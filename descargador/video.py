@@ -12,17 +12,32 @@ import yt_dlp
 def descargar_video(url: str, carpeta_salida: str = "descargas", calidad: str = "best") -> str:
     os.makedirs(carpeta_salida, exist_ok=True)
 
-    # si piden algo tipo "720p" armamos el formato manualmente, sino
-    # dejamos que yt-dlp use best/worst directo
-    formato = calidad
-    if calidad not in ("best", "worst"):
+    # preferimos H.264 (avc1) sobre HEVC/AV1: HEVC anda perfecto en el
+    # archivo pero muchos reproductores (ej. Windows sin el codec pago de
+    # la Store) no lo pueden reproducir. Si el sitio no tiene avc1
+    # disponible, el "/" hace fallback a lo que haya (bestvideo/best).
+    if calidad in ("best", "worst"):
+        formato = f"{calidad}video[vcodec^=avc1]+bestaudio/{calidad}"
+    else:
         altura = calidad.replace("p", "")
-        formato = f"bestvideo[height<={altura}]+bestaudio/best"
+        formato = (
+            f"bestvideo[height<={altura}][vcodec^=avc1]+bestaudio"
+            f"/bestvideo[height<={altura}]+bestaudio"
+            f"/best[height<={altura}]"
+        )
 
     ydl_opts = {
         "format": formato,
         "outtmpl": os.path.join(carpeta_salida, "%(title)s.%(ext)s"),
         "merge_output_format": "mp4",
+        # algunos sitios (ej. bilibili) entregan el video ya muxeado en
+        # otro contenedor (flv, etc), asi que merge_output_format no aplica
+        # ahi porque no hay merge. Este remuxer fuerza mp4 siempre, se haya
+        # mezclado o no. Es solo cambio de contenedor, no recodifica, asi
+        # que es rapido.
+        "postprocessors": [
+            {"key": "FFmpegVideoRemuxer", "preferedformat": "mp4"},
+        ],
         "noplaylist": True,
         "quiet": False,
         "no_warnings": False,
@@ -63,6 +78,3 @@ def descargar_audio(url: str, carpeta_salida: str = "descargas") -> str:
         ruta = ydl.prepare_filename(info)
         base, _ = os.path.splitext(ruta)
         return base + ".mp3"
-
-# TODO: agregar soporte para pasar cookies (--cookies-from-browser) para
-# poder bajar contenido privado/con restriccion de edad
